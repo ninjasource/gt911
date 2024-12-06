@@ -1,0 +1,21 @@
+[package]
+name = "gt911"
+authors = ["David Haig"]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ninjasource/gt911.git"
+description = "An embedded touchscreen driver for GT911"
+keywords = ["touchscreen", "gt911", "embedded-hal", "embedded-hal-async"]
+categories = ["embedded", "no-std", "hardware-support"]
+readme = "README.md"
+
+[dependencies]
+embedded-hal = { version = "1.0.0" }
+embedded-hal-async = { version = "1.0.0" }
+heapless = { version = "0.8", default-features = false }
+defmt = { version = "0.3", optional = true }
+
+[features]
+default = []
+defmt = ["dep:defmt", "heapless/defmt-03"]
