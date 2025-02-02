@@ -1,0 +1,42 @@
+[package]
+name = "stm32u5-examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gt911 = { path = "../..", features = ["defmt"] }
+embassy-stm32 = { version = "0.2.0", features = [
+    "stm32u5g9zj",
+    "time-driver-any",
+    "exti",
+    "memory-x",
+    "unstable-pac",
+    "chrono",
+    "time",
+    "defmt",
+] }
+embassy-executor = { version = "0.7.0", features = [
+    "task-arena-size-32768",
+    "arch-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+    "defmt",
+] }
+embassy-time = { version = "0.4.0", features = [
+    "defmt",
+    "tick-hz-32_768",
+    "defmt-timestamp-uptime",
+] }
+defmt = { version = "0.3" }
+defmt-rtt = { version = "0.4" }
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+cortex-m = { version = "0.7.7", features = [
+    "inline-asm",
+    "critical-section-single-core",
+] }
+cortex-m-rt = { version = "0.7.3" }
+
+[profile.release]
+debug = true    # required for decent panic messages
+opt-level = "s"
+lto = "thin"

@@ -13,6 +13,8 @@ const GT911_COMMAND_REG: u16 = 0x8040;
 
 const MAX_NUM_TOUCHPOINTS: usize = 5;
 const TOUCHPOINT_ENTRY_LEN: usize = 8;
+pub const GET_TOUCH_BUF_SIZE: usize = TOUCHPOINT_ENTRY_LEN;
+pub const GET_MULTITOUCH_BUF_SIZE: usize = TOUCHPOINT_ENTRY_LEN * MAX_NUM_TOUCHPOINTS;
 
 /// The touchpoint
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -211,14 +213,17 @@ where
 
     /// Checks the ProductId for a "911\0" string response and resets the status register
     /// Only needs to be called once on startup
-    pub async fn init(&self, i2c: &mut I2C) -> Result<(), Error<E>> {
+    /// buf is a temp read buffer and should be at least 4 bytes in length
+    pub async fn init(&self, i2c: &mut I2C, buf: &mut [u8]) -> Result<(), Error<E>> {
         // switch to command mode
         self.write(i2c, GT911_COMMAND_REG, 0).await?;
 
         // read the product_id and confirm that it is expected
-        let mut read = [0u8; 4];
-        self.read(i2c, GT911_PRODUCT_ID_REG, &mut read).await?;
-        match str::from_utf8(&read) {
+        const LEN: usize = 4;
+        assert!(buf.len() >= LEN);
+        self.read(i2c, GT911_PRODUCT_ID_REG, &mut buf[..LEN])
+            .await?;
+        match str::from_utf8(&buf[..LEN]) {
             Ok(product_id) => {
                 if product_id != "911\0" {
                     return Err(Error::UnexpectedProductId);
@@ -236,13 +241,26 @@ where
 
     /// Gets a single touch point
     /// Returns Ok(None) for release, Some(point) for press or move and Err(Error::NotReady) for no data
-    pub async fn get_touch(&self, i2c: &mut I2C) -> Result<Option<Point>, Error<E>> {
-        let num_touch_points = self.get_num_touch_points(i2c).await?;
+    /// buf is a temp read buffer and should be at least 8 bytes in length
+    pub async fn get_touch(
+        &self,
+        i2c: &mut I2C,
+        buf: &mut [u8],
+    ) -> Result<Option<Point>, Error<E>> {
+        let num_touch_points = self.get_num_touch_points(i2c, buf).await?;
 
         let point = if num_touch_points > 0 {
-            let mut read = [0u8; TOUCHPOINT_ENTRY_LEN];
-            self.read(i2c, GT911_TOUCHPOINT_1_REG, &mut read).await?;
-            let point = decode_point(&read);
+            assert!(
+                buf.len() >= TOUCHPOINT_ENTRY_LEN,
+                "Buffer too small, use GET_TOUCH_BUF_SIZE"
+            );
+            self.read(
+                i2c,
+                GT911_TOUCHPOINT_1_REG,
+                &mut buf[..TOUCHPOINT_ENTRY_LEN],
+            )
+            .await?;
+            let point = decode_point(buf);
             Some(point)
         } else {
             None
@@ -255,28 +273,30 @@ where
 
     /// Gets multiple stack allocated touch points (0-5 points)
     /// Returns points.len()==0 for release, points.len()>0 for press or move and Err(Error::NotReady) for no data
+    /// buf is a temp read buffer and should be at least num_touch_points * 8 bytes in length (40 bytes to be safe because there can be up to 5 touch points)
     pub async fn get_multi_touch(
         &self,
         i2c: &mut I2C,
+        buf: &mut [u8],
     ) -> Result<heapless::Vec<Point, MAX_NUM_TOUCHPOINTS>, Error<E>> {
-        let num_touch_points = self.get_num_touch_points(i2c).await?;
+        let num_touch_points = self.get_num_touch_points(i2c, buf).await?;
 
         let points = if num_touch_points > 0 {
             assert!(num_touch_points <= MAX_NUM_TOUCHPOINTS);
             let mut points = heapless::Vec::new();
 
             // read touch points
-            let mut read = [0u8; TOUCHPOINT_ENTRY_LEN * MAX_NUM_TOUCHPOINTS];
-            self.read(
-                i2c,
-                GT911_TOUCHPOINT_1_REG,
-                &mut read[..TOUCHPOINT_ENTRY_LEN * num_touch_points],
-            )
-            .await?;
+            let len: usize = num_touch_points * TOUCHPOINT_ENTRY_LEN;
+            assert!(
+                buf.len() >= len,
+                "Buffer too small, use GET_MULTITOUCH_BUF_SIZE"
+            );
+            self.read(i2c, GT911_TOUCHPOINT_1_REG, &mut buf[..len])
+                .await?;
 
             for n in 0..num_touch_points {
                 let start = n * TOUCHPOINT_ENTRY_LEN;
-                let point = decode_point(&read[start..start + TOUCHPOINT_ENTRY_LEN]);
+                let point = decode_point(&buf[start..start + TOUCHPOINT_ENTRY_LEN]);
                 points.push(point).ok();
             }
 
@@ -290,13 +310,13 @@ where
         Ok(points)
     }
 
-    async fn get_num_touch_points(&self, i2c: &mut I2C) -> Result<usize, Error<E>> {
+    async fn get_num_touch_points(&self, i2c: &mut I2C, buf: &mut [u8]) -> Result<usize, Error<E>> {
         // read coords
-        let mut read = [0u8; 1];
-        self.read(i2c, GT911_TOUCHPOINT_STATUS_REG, &mut read)
+        assert!(!buf.is_empty());
+        self.read(i2c, GT911_TOUCHPOINT_STATUS_REG, &mut buf[..1])
             .await?;
 
-        let status = read[0];
+        let status = buf[0];
         let ready = (status & 0x80) > 0;
         let num_touch_points = (status & 0x0F) as usize;
 

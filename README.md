@@ -14,12 +14,17 @@ See full example at the end.
 
 ```rust
     let touch = Gt911::default();
-    touch.init(&mut i2c).await.unwrap();
+    let mut buf = [0u8; gt911::GET_TOUCH_BUF_SIZE];
 
-    if let Ok(point) = touch.get_touch(&mut i2c).await {
-        // point can be Some (pressed or moved) or None (released)
-    } else {
-        // ignore because nothing has happened since last poll => Error::NotReady
+    touch.init(&mut i2c, &mut buf).await.unwrap();
+
+    loop {
+        if let Ok(point) = touch.get_touch(&mut i2c, &mut buf).await {
+            // point can be Some (pressed or moved) or None (released)
+            info!("{:?}", point)
+        } else {
+            // ignore because nothing has happened since last poll => Error::NotReady
+        }
     }
 
 ```
@@ -30,10 +35,15 @@ See full example at the end.
 ```rust
 
     let touch = Gt911::default();
-    touch.init(&mut i2c).await.unwrap();
+    let mut buf = [0u8; gt911::GET_MULTITOUCH_BUF_SIZE];
 
-    if let Ok(points) = touch.get_multi_touch(&mut i2c).await {
-        // stack allocated Vec containing 0-5 points
+    touch.init(&mut i2c, &mut buf).await.unwrap();
+
+    loop {
+        if let Ok(points) = touch.get_multi_touch(&mut i2c, &mut buf).await {
+            // stack allocated Vec containing 0-5 points
+            info!("{:?}", points)
+        }
     }
 ```
 
@@ -45,94 +55,36 @@ See full example at the end.
     let touch = Gt911Blocking::default();
     touch.init(&mut i2c).unwrap();
 
-    if let Ok(point) = touch.get_touch(&mut i2c) {
-        // point can be Some (pressed or moved) or None (released)
+    loop {
+        if let Ok(point) = touch.get_touch(&mut i2c) {
+            // point can be Some (pressed or moved) or None (released)
+            info!("{:?}", point)
+        } else {
+            // ignore because nothing has happened since last poll => Error::NotReady
+        }
     }
 
 ```
 
-## Muiti-touch blocking exapoll examplemple 
+## Muiti-touch blocking poll example
 
 
 ```rust
-
     let touch = Gt911Blocking::default();
     touch.init(&mut i2c).unwrap();
 
-    if let Ok(points) = touch.get_multi_touch(&mut i2c) {
-        // stack allocated Vec containing 0-5 points
-    }
-```
-
-
-
-## Full single touch async poll example using Embassy and an stm32u5g9j-dk2
-
-```rust
-#![no_std]
-#![no_main]
-#![macro_use]
-
-use {
-    defmt::info,
-    defmt_rtt as _,
-    gt911::Gt911,
-    embassy_executor::Spawner,
-    embassy_stm32::{
-        bind_interrupts,
-        i2c::{self, I2c},
-        peripherals,
-        time::Hertz,
-    },
-    panic_probe as _,
-};
-
-bind_interrupts!(struct Irqs {
-    I2C2_EV => i2c::EventInterruptHandler<peripherals::I2C2>;
-    I2C2_ER => i2c::ErrorInterruptHandler<peripherals::I2C2>;
-});
-
-#[embassy_executor::main]
-async fn main(_spawner: Spawner) {
-    let p = embassy_stm32::init(Default::default());
-
-    let mut i2c = I2c::new(
-        p.I2C2,
-        p.PF1,
-        p.PF0,
-        Irqs,
-        p.GPDMA1_CH0,
-        p.GPDMA1_CH1,
-        Hertz(100_000),
-        Default::default(),
-    );
-
-    // connect with the default i2c address
-    let touch = Gt911::default();
-    touch.init(&mut i2c).await.unwrap();
-
-    let mut last_point = None;
-
     loop {
-        // get single touchpoint
-        if let Ok(point) = touch.get_touch(&mut i2c).await {
-            match point {
-                Some(point) => match last_point.replace(point.clone()) {
-                    Some(old_point) => {
-                        if point != old_point {
-                            info!("moved: {:?}", point);
-                        }
-                    }
-                    None => {
-                        info!("pressed: {:?}", point);
-                    }
-                },
-                None => {
-                    let point = last_point.take();
-                    info!("released: {:?}", point);
-                }
-            };
+        if let Ok(points) = touch.get_multi_touch(&mut i2c) {
+            // stack allocated Vec containing 0-5 points
+            info!("{:?}", points)
         }
     }
-}
 ```
+
+See Examples folder for full examples
+
+# Why the async version is different
+
+Why does the async version take a read buffer and not the blocking version? 
+Some mcu's support DCACHE but have data cache coherency issues with DMA (stm32h7 mcus in particular). 
+In order to address this the user can exclude a special memory region from DCACHE and use this buffer for i2c communication over await points. Alternatively the user can disable dcache.
